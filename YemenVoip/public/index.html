@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>YemenVoip — Voice termination into Yemen</title>
+<meta name="description" content="YemenVoip connects international carriers and VoIP wholesalers to Yemen's mobile and fixed networks, with carrier-grade quality, live route monitoring and a 24/7 NOC." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0E1E33;        /* carrier navy */
+    --bg-2:#13284A;      /* raised surface */
+    --line:rgba(173,198,230,.14);
+    --ink-inv:#EAF1FA;
+    --muted-inv:#9BB0CC;
+    --paper:#F4F6FA;     /* cool light */
+    --paper-2:#FFFFFF;
+    --ink:#0E1B2E;
+    --muted:#55637A;
+    --signal:#34C8C0;    /* live signal */
+    --signal-deep:#1C8E88;
+    --radius:14px;
+    --maxw:1120px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink-inv);
+    font-family:"IBM Plex Sans",system-ui,sans-serif;
+    font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{font-family:"Space Grotesk",sans-serif;line-height:1.08;margin:0;font-weight:600;letter-spacing:-.01em}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+  /* header */
+  header{position:sticky;top:0;z-index:40;background:rgba(14,30,51,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:66px}
+  .brand{font-family:"Space Grotesk";font-weight:700;font-size:21px;letter-spacing:-.02em;color:var(--ink-inv)}
+  .brand b{color:var(--signal);font-weight:700}
+  .nav-links{display:flex;gap:30px;align-items:center}
+  .nav-links a{color:var(--muted-inv);font-size:15px;font-weight:500}
+  .nav-links a:hover{color:var(--ink-inv)}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-family:"IBM Plex Sans";font-weight:600;font-size:15px;
+    padding:11px 20px;border-radius:999px;border:1px solid transparent;cursor:pointer;transition:.18s}
+  .btn-signal{background:var(--signal);color:#06201F}
+  .btn-signal:hover{background:#43d8d0;transform:translateY(-1px)}
+  .btn-ghost{background:transparent;color:var(--ink-inv);border-color:var(--line)}
+  .btn-ghost:hover{border-color:var(--signal);color:var(--signal)}
+  @media(max-width:760px){.nav-links a:not(.btn){display:none}}
+
+  /* hero */
+  .hero{padding:72px 0 40px}
+  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
+  .tag{display:inline-flex;align-items:center;gap:9px;font-size:14px;color:var(--muted-inv);margin-bottom:22px}
+  .tag .dot{width:8px;height:8px;border-radius:50%;background:var(--signal);box-shadow:0 0 0 0 rgba(52,200,192,.6);animation:pulse 2.4s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,200,192,.5)}70%{box-shadow:0 0 0 9px rgba(52,200,192,0)}100%{box-shadow:0 0 0 0 rgba(52,200,192,0)}}
+  h1{font-size:clamp(38px,5.4vw,62px)}
+  h1 .em{color:var(--signal)}
+  .lede{color:var(--muted-inv);font-size:19px;max-width:30ch;margin:22px 0 32px}
+  .hero-cta{display:flex;gap:14px;flex-wrap:wrap}
+  .hero-meta{margin-top:34px;display:flex;gap:34px;flex-wrap:wrap}
+  .hero-meta div{border-left:2px solid var(--signal-deep);padding-left:14px}
+  .hero-meta .k{font-family:"Space Grotesk";font-weight:600;font-size:24px;color:var(--ink-inv)}
+  .hero-meta .l{font-size:13.5px;color:var(--muted-inv)}
+  @media(max-width:860px){.hero-grid{grid-template-columns:1fr;gap:30px}.lede{max-width:46ch}}
+
+  /* network graph */
+  .graph{width:100%;height:auto}
+  .graph-wrap{position:relative;background:radial-gradient(120% 120% at 70% 20%,#17305a 0%,#0E1E33 62%);
+    border:1px solid var(--line);border-radius:22px;padding:14px}
+  .node-label{font-family:"IBM Plex Sans";font-size:13px;fill:var(--ink-inv);font-weight:500}
+  .node-sub{font-size:10.5px;fill:var(--muted-inv)}
+
+  /* light band */
+  .band{background:var(--paper);color:var(--ink)}
+  .band h2{color:var(--ink)}
+  .section{padding:84px 0}
+  .kicker{font-size:15px;color:var(--signal-deep);font-weight:600;margin:0 0 10px}
+  .band .kicker{color:var(--signal-deep)}
+  h2{font-size:clamp(28px,3.6vw,40px);max-width:18ch}
+  .section-lede{color:var(--muted);font-size:18px;max-width:58ch;margin:16px 0 0}
+  .dark .section-lede{color:var(--muted-inv)}
+
+  /* coverage chips */
+  .nets{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:40px}
+  .net{background:var(--paper-2);border:1px solid #E4E9F1;border-radius:var(--radius);padding:20px 22px}
+  .net .n{font-family:"Space Grotesk";font-weight:600;font-size:19px;color:var(--ink)}
+  .net .t{font-size:14px;color:var(--muted);margin-top:4px}
+  .net .live{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--signal-deep);margin-top:14px;font-weight:600}
+  .net .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--signal)}
+
+  /* capability rows */
+  .caps{margin-top:44px;display:grid;grid-template-columns:1fr 1fr;gap:0 56px}
+  .cap{padding:26px 0;border-top:1px solid var(--line)}
+  .dark .cap{border-top-color:var(--line)}
+  .cap h3{font-size:20px;color:var(--ink-inv);margin-bottom:8px;display:flex;align-items:baseline;gap:12px}
+  .cap h3 .ix{font-family:"Space Grotesk";font-size:14px;color:var(--signal);font-weight:600}
+  .cap p{color:var(--muted-inv);font-size:16px;margin:0}
+  @media(max-width:720px){.caps{grid-template-columns:1fr;gap:0}}
+
+  /* onboarding steps (a real sequence) */
+  .steps{counter-reset:s;margin-top:40px;display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+  .step{background:var(--paper-2);border:1px solid #E4E9F1;border-radius:var(--radius);padding:26px 24px;position:relative}
+  .step::before{counter-increment:s;content:counter(s);font-family:"Space Grotesk";font-weight:700;font-size:15px;
+    color:#06201F;background:var(--signal);width:30px;height:30px;border-radius:50%;display:grid;place-items:center;margin-bottom:16px}
+  .step h3{font-size:19px;color:var(--ink);margin-bottom:8px}
+  .step p{color:var(--muted);font-size:15.5px;margin:0}
+  .step .flow{position:absolute;top:40px;right:-15px;color:#C6D0DE}
+  @media(max-width:720px){.steps{grid-template-columns:1fr}.step .flow{display:none}}
+
+  /* contact */
+  .contact-grid{display:grid;grid-template-columns:.8fr 1.2fr;gap:48px;margin-top:40px}
+  .addr{color:var(--muted-inv);font-size:16.5px;line-height:1.8}
+  .addr .city{font-family:"Space Grotesk";font-size:22px;color:var(--ink-inv);font-weight:600}
+  .mails{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .mail{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:20px;transition:.18s}
+  .mail:hover{border-color:var(--signal);transform:translateY(-2px)}
+  .mail .p{font-size:13.5px;color:var(--muted-inv)}
+  .mail .a{font-family:"Space Grotesk";font-size:17px;color:var(--signal);font-weight:600;margin-top:6px;word-break:break-all}
+  @media(max-width:720px){.contact-grid{grid-template-columns:1fr;gap:28px}.mails{grid-template-columns:1fr}}
+
+  footer{border-top:1px solid var(--line);padding:30px 0}
+  .foot{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;color:var(--muted-inv);font-size:14px}
+
+  /* rates modal */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(6,16,30,.72);backdrop-filter:blur(4px);
+    display:none;align-items:center;justify-content:center;z-index:60;padding:20px}
+  .modal-backdrop.open{display:flex;animation:fade .18s ease}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .modal{background:var(--bg-2);border:1px solid var(--line);border-radius:18px;max-width:470px;width:100%;
+    padding:28px;box-shadow:0 30px 80px rgba(0,0,0,.5);max-height:92vh;overflow:auto}
+  .modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .modal h3{font-size:24px;color:var(--ink-inv);margin:0 0 6px}
+  .modal .sub{color:var(--muted-inv);font-size:15px;margin:0 0 20px}
+  .x{background:none;border:none;color:var(--muted-inv);font-size:26px;line-height:1;cursor:pointer;padding:0 2px}
+  .x:hover{color:var(--ink-inv)}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:13.5px;color:var(--muted-inv);margin-bottom:6px;font-weight:500}
+  .field input,.field textarea{width:100%;background:#0E1E33;border:1px solid var(--line);border-radius:10px;
+    padding:11px 13px;color:var(--ink-inv);font-family:inherit;font-size:15px;outline:none;transition:.15s}
+  .field input:focus,.field textarea:focus{border-color:var(--signal)}
+  .field textarea{resize:vertical;min-height:74px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .modal-actions{display:flex;gap:10px;margin-top:22px}
+  .modal-actions .btn{flex:1;justify-content:center}
+  @media(max-width:480px){.row2{grid-template-columns:1fr}}
+
+  @media(prefers-reduced-motion:reduce){
+    *{animation:none!important}
+    html{scroll-behavior:auto}
+    .pulse-path{stroke-dashoffset:0!important}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap nav">
+    <div class="brand">Yemen<b>Voip</b></div>
+    <nav class="nav-links">
+      <a href="#coverage">Coverage</a>
+      <a href="#why">Network</a>
+      <a href="#onboard">Onboarding</a>
+      <a href="#contact">Contact</a>
+      <button type="button" class="btn btn-signal" data-open-rates>Request rates</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- HERO -->
+  <section class="hero dark">
+    <div class="wrap hero-grid">
+      <div>
+        <div class="tag"><span class="dot"></span> Wholesale voice carrier for Yemen</div>
+        <h1>Voice termination into Yemen, on <span class="em">every network</span>.</h1>
+        <p class="lede">We connect international carriers and VoIP wholesalers to Yemen's mobile and fixed networks — carrier-grade quality, live route monitoring, and a NOC that answers.</p>
+        <div class="hero-cta">
+          <button type="button" class="btn btn-signal" data-open-rates>Request rates</button>
+          <a class="btn btn-ghost" href="mailto:noc@yemenvoip.com">Talk to the NOC</a>
+        </div>
+        <div class="hero-meta">
+          <div><div class="k">All networks</div><div class="l">Mobile &amp; fixed line</div></div>
+          <div><div class="k">24/7</div><div class="l">NOC &amp; monitoring</div></div>
+          <div><div class="k">Quality</div><div class="l">ASR &amp; ACD monitored</div></div>
+        </div>
+      </div>
+
+      <div class="graph-wrap" aria-hidden="true">
+        <svg class="graph" viewBox="0 0 560 480" role="img">
+          <defs>
+            <radialGradient id="hub" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#4ad8d0"/><stop offset="100%" stop-color="#1C8E88"/>
+            </radialGradient>
+          </defs>
+          <!-- links -->
+          <g stroke="#2a4a74" stroke-width="1.4" fill="none">
+            <path d="M280,250 L120,96"/><path d="M280,250 L470,120"/>
+            <path d="M280,250 L96,300"/><path d="M280,250 L472,320"/>
+            <path d="M280,250 L250,430"/>
+          </g>
+          <!-- travelling signal pulses -->
+          <g stroke="#34C8C0" stroke-width="2.2" fill="none" stroke-linecap="round">
+            <path class="pulse-path p1" d="M280,250 L120,96"/>
+            <path class="pulse-path p2" d="M280,250 L472,320"/>
+            <path class="pulse-path p3" d="M280,250 L250,430"/>
+          </g>
+          <!-- signal rings -->
+          <circle class="ring" cx="280" cy="250" r="34" fill="none" stroke="#34C8C0" stroke-opacity="0" stroke-width="1.5"/>
+          <!-- hub -->
+          <circle cx="280" cy="250" r="26" fill="url(#hub)"/>
+          <text x="280" y="254" text-anchor="middle" class="node-label" fill="#06201F" font-weight="700" font-size="12">HUB</text>
+          <!-- nodes -->
+          <g>
+            <circle cx="120" cy="96" r="9" fill="#13284A" stroke="#34C8C0" stroke-width="2"/>
+            <text x="120" y="78" text-anchor="middle" class="node-label">SabaFon</text>
+            <circle cx="470" cy="120" r="9" fill="#13284A" stroke="#34C8C0" stroke-width="2"/>
+            <text x="470" y="102" text-anchor="middle" class="node-label">Yemen Mobile</text>
+            <circle cx="96" cy="300" r="9" fill="#13284A" stroke="#34C8C0" stroke-width="2"/>
+            <text x="96" y="330" text-anchor="middle" class="node-label">YOU</text>
+            <circle cx="472" cy="320" r="9" fill="#13284A" stroke="#34C8C0" stroke-width="2"/>
+            <text x="472" y="350" text-anchor="middle" class="node-label">Y</text>
+            <circle cx="250" cy="430" r="9" fill="#13284A" stroke="#34C8C0" stroke-width="2"/>
+            <text x="250" y="452" text-anchor="middle" class="node-label">Fixed line</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- COVERAGE -->
+  <section class="section band" id="coverage">
+    <div class="wrap">
+      <p class="kicker">Coverage</p>
+      <h2>Reach across Yemen's networks</h2>
+      <p class="section-lede">Termination to mobile and fixed destinations nationwide, with routes monitored for answer rate and call quality.</p>
+      <div class="nets">
+        <div class="net"><div class="n">SabaFon</div><div class="t">Mobile</div><div class="live">Reachable</div></div>
+        <div class="net"><div class="n">Yemen Mobile</div><div class="t">Mobile</div><div class="live">Reachable</div></div>
+        <div class="net"><div class="n">YOU</div><div class="t">Mobile</div><div class="live">Reachable</div></div>
+        <div class="net"><div class="n">Y Telecom</div><div class="t">Mobile</div><div class="live">Reachable</div></div>
+        <div class="net"><div class="n">Fixed line</div><div class="t">Landline &amp; enterprise</div><div class="live">Reachable</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY / CAPABILITIES -->
+  <section class="section dark" id="why">
+    <div class="wrap">
+      <p class="kicker">The network</p>
+      <h2>Built to carry voice, not just route it</h2>
+      <div class="caps">
+        <div class="cap">
+          <h3><span class="ix">01</span> One route, every network</h3>
+          <p>A single connection reaches Yemen's mobile and fixed networks, so you cover the whole country without stitching together multiple suppliers.</p>
+        </div>
+        <div class="cap">
+          <h3><span class="ix">02</span> Quality you can see</h3>
+          <p>Answer-seizure ratio and average call duration are watched continuously, and routes are adjusted in real time when a destination degrades.</p>
+        </div>
+        <div class="cap">
+          <h3><span class="ix">03</span> A NOC that answers</h3>
+          <p>Engineers on call around the clock at noc@yemenvoip.com — not a ticket queue you wait behind during an incident.</p>
+        </div>
+        <div class="cap">
+          <h3><span class="ix">04</span> Billing without surprises</h3>
+          <p>Clear CDRs, predictable invoicing, and disputes handled quickly through billing@yemenvoip.com.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ONBOARDING -->
+  <section class="section band" id="onboard">
+    <div class="wrap">
+      <p class="kicker">Onboarding</p>
+      <h2>From first email to live traffic</h2>
+      <p class="section-lede">A short, predictable path for carriers and wholesalers. Most interops complete within a few business days.</p>
+      <div class="steps">
+        <div class="step">
+          <h3>Request rates</h3>
+          <p>Email rates@yemenvoip.com and we send the current Yemen rate sheet and destinations.</p>
+          <span class="flow">&#8594;</span>
+        </div>
+        <div class="step">
+          <h3>Interop &amp; test</h3>
+          <p>We exchange SIP details, run test calls, and confirm quality on each network together.</p>
+          <span class="flow">&#8594;</span>
+        </div>
+        <div class="step">
+          <h3>Go live</h3>
+          <p>Agree commercial terms, set up billing, and start routing with monitoring in place.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONTACT -->
+  <section class="section dark" id="contact">
+    <div class="wrap">
+      <p class="kicker">Contact</p>
+      <h2>Talk to the right desk directly</h2>
+      <div class="contact-grid">
+        <div class="addr">
+          <div class="city">Sana'a, Yemen</div>
+          Zubairi Street, YCB Tower, 4th Floor<br/>
+          Sana'a, Republic of Yemen
+          <div style="margin-top:18px;font-size:14px;color:var(--muted-inv)">Office hours: Sun–Thu, 9:00–17:00 (AST)</div>
+        </div>
+        <div class="mails">
+          <a class="mail" href="mailto:info@yemenvoip.com"><div class="p">General enquiries</div><div class="a">info@yemenvoip.com</div></a>
+          <a class="mail" href="mailto:rates@yemenvoip.com"><div class="p">Voice &amp; SMS rates</div><div class="a">rates@yemenvoip.com</div></a>
+          <a class="mail" href="mailto:billing@yemenvoip.com"><div class="p">Invoices &amp; payments</div><div class="a">billing@yemenvoip.com</div></a>
+          <a class="mail" href="mailto:noc@yemenvoip.com"><div class="p">Technical support &amp; NOC</div><div class="a">noc@yemenvoip.com</div></a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- RATES REQUEST MODAL -->
+<div class="modal-backdrop" id="ratesModal" role="dialog" aria-modal="true" aria-labelledby="ratesTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h3 id="ratesTitle">Request rates</h3>
+        <p class="sub">Tell us where you send traffic and we'll reply with the current Yemen rate sheet.</p>
+      </div>
+      <button class="x" type="button" data-close-rates aria-label="Close">&times;</button>
+    </div>
+    <form id="ratesForm">
+      <div class="row2">
+        <div class="field"><label for="rf-company">Company</label><input id="rf-company" name="company" autocomplete="organization" required></div>
+        <div class="field"><label for="rf-name">Your name</label><input id="rf-name" name="name" autocomplete="name" required></div>
+      </div>
+      <div class="field"><label for="rf-email">Work email</label><input id="rf-email" name="email" type="email" autocomplete="email" required></div>
+      <div class="field"><label for="rf-volume">Estimated monthly volume (minutes)</label><input id="rf-volume" name="volume" inputmode="numeric" placeholder="e.g. 500,000"></div>
+      <div class="field"><label for="rf-notes">Destinations / notes</label><textarea id="rf-notes" name="notes" placeholder="Networks you need, current ASR, switch / protocol…"></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-rates>Cancel</button>
+        <button type="submit" class="btn btn-signal">Send request</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap foot">
+    <div>© <span id="yr"></span> YemenVoip — Sana'a, Yemen</div>
+    <div>Wholesale voice termination · <a href="mailto:info@yemenvoip.com" style="color:var(--signal)">info@yemenvoip.com</a></div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('yr').textContent = new Date().getFullYear();
+
+  // Rates request modal → composes a structured email to rates@yemenvoip.com
+  (function(){
+    var modal = document.getElementById('ratesModal');
+    function open(){ modal.classList.add('open'); document.body.style.overflow='hidden';
+      var f=document.getElementById('rf-company'); if(f) f.focus(); }
+    function close(){ modal.classList.remove('open'); document.body.style.overflow=''; }
+    document.querySelectorAll('[data-open-rates]').forEach(function(b){ b.addEventListener('click', open); });
+    document.querySelectorAll('[data-close-rates]').forEach(function(b){ b.addEventListener('click', close); });
+    modal.addEventListener('click', function(e){ if(e.target===modal) close(); });
+    document.addEventListener('keydown', function(e){ if(e.key==='Escape' && modal.classList.contains('open')) close(); });
+    document.getElementById('ratesForm').addEventListener('submit', function(e){
+      e.preventDefault();
+      var g=function(id){ var el=document.getElementById(id); return el ? el.value.trim() : ''; };
+      var company=g('rf-company');
+      var subject='Rate request — '+(company||'YemenVoip');
+      var body=[
+        'Company: '+company,
+        'Contact: '+g('rf-name'),
+        'Email: '+g('rf-email'),
+        'Estimated monthly volume (minutes): '+(g('rf-volume')||'—'),
+        '',
+        'Destinations / notes:',
+        g('rf-notes')||'—'
+      ].join('\n');
+      window.location.href='mailto:rates@yemenvoip.com?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+      close();
+    });
+  })();
+  // One orchestrated load moment: draw the signal pulses along the routes.
+  (function(){
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    document.querySelectorAll('.pulse-path').forEach(function(p,i){
+      var len = p.getTotalLength();
+      p.style.strokeDasharray = (len*0.22)+' '+len;
+      p.style.strokeDashoffset = len;
+      p.animate(
+        [{strokeDashoffset:len},{strokeDashoffset:-len}],
+        {duration:2600, delay:400+i*600, iterations:Infinity, easing:'cubic-bezier(.4,0,.5,1)'}
+      );
+    });
+  })();
+</script>
+</body>
+</html>

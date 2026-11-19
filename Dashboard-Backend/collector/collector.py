@@ -1,0 +1,432 @@
+#!/usr/bin/env python3
+"""
+SIM dashboard collector — runs on the VM, pushes data to the gatewayPush function.
+
+Modes:
+  cdr       Read new Asterisk CDRs from MySQL and forward them (works now).
+  callstat  Poll the gateway's per-SIM call statistics and forward them.
+  sms       Poll the gateway inbox for USSD balance replies and forward them.
+
+Config comes from environment variables (see collector.env.example).
+"""
+import os, sys, json, base64, subprocess, urllib.request, urllib.error, urllib.parse, datetime
+
+FUNC_URL = os.environ.get('FUNC_URL')      # https://europe-west4-...cloudfunctions.net/gatewayPush
+TOKEN    = os.environ.get('PUSH_TOKEN')
+
+
+def post(payload):
+    url = FUNC_URL + ('&' if '?' in FUNC_URL else '?') + 'token=' + urllib.parse.quote(TOKEN)
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return r.read().decode()
+
+
+# ----------------------------- CDR mode -----------------------------
+def run_cdr():
+    host = os.environ.get('DB_HOST', 'localhost')
+    user = os.environ.get('DB_USER', 'root')
+    pw   = os.environ.get('DB_PASS', '')
+    db   = os.environ.get('DB_NAME', 'asteriskcdrdb')
+    state_file = os.environ.get('STATE_FILE', os.path.expanduser('~/.cdr_collector_state'))
+
+    try:
+        last = open(state_file).read().strip() or '1970-01-01 00:00:00'
+    except FileNotFoundError:
+        last = '1970-01-01 00:00:00'
+
+    cols = ['uniqueid', 'calldate', 'src', 'dst', 'duration', 'billsec', 'disposition', 'channel', 'dstchannel']
+    q = ("SELECT uniqueid, DATE_FORMAT(calldate,'%Y-%m-%d %H:%i:%s'), src, dst, "
+         "duration, billsec, disposition, channel, dstchannel "
+         "FROM cdr WHERE calldate > '{last}' ORDER BY calldate ASC LIMIT 500").format(last=last)
+
+    args = ['mysql', '-N', '-B', '-h', host, '-u', user]
+    if pw:
+        args.append('-p' + pw)
+    args += [db, '-e', q]
+
+    out = subprocess.run(args, capture_output=True, text=True)
+    if out.returncode != 0:
+        print('mysql error:', out.stderr.strip(), file=sys.stderr)
+        sys.exit(1)
+
+    rows, maxdate = [], last
+    for line in out.stdout.splitlines():
+        parts = line.split('\t')
+        if len(parts) < len(cols):
+            continue
+        rec = dict(zip(cols, parts))
+        cd = rec['calldate']
+        try:
+            ms = int(datetime.datetime.strptime(cd, '%Y-%m-%d %H:%M:%S').timestamp() * 1000)
+        except Exception:
+            ms = None
+        rows.append({
+            'uniqueid': rec['uniqueid'],
+            'calldate': cd, 'calldateMs': ms,
+            'src': rec['src'], 'dst': rec['dst'],
+            'duration': int(rec['duration']) if rec['duration'].isdigit() else None,
+            'billsec': int(rec['billsec']) if rec['billsec'].isdigit() else None,
+            'disposition': rec['disposition'],
+            'channel': rec['channel'], 'dstchannel': rec['dstchannel'],
+        })
+        if cd > maxdate:
+            maxdate = cd
+
+    if not rows:
+        print('no new CDRs')
+        return
+    for i in range(0, len(rows), 200):
+        post({'type': 'cdr', 'rows': rows[i:i + 200]})
+    with open(state_file, 'w') as f:
+        f.write(maxdate)
+    print('posted %d CDRs, state=%s' % (len(rows), maxdate))
+
+
+# --------------------------- Call-stat mode -------------------------
+def run_callstat():
+    host = os.environ.get('SK_HOST', '192.168.8.10')
+    port = os.environ.get('SK_PORT', '80')
+    user = os.environ.get('SK_USER')
+    pw   = os.environ.get('SK_PASS')
+
+    # Forward the raw gateway stats for both windows; the Cloud Function does
+    # the field mapping and per-SIM write (so schema tweaks never touch the VM).
+    # type: 2 = today, 3 = cumulative
+    out = {'type': 'call-stat'}
+    for window, typ in (('today', '2'), ('total', '3')):
+        url = ("http://%s:%s/goip_get_call_stat.html?" % (host, port)) + urllib.parse.urlencode({
+            'version': '1.1', 'username': user, 'password': pw,
+            'ports': 'all', 'slots': 'all', 'type': typ,
+        })
+        try:
+            with urllib.request.urlopen(url, timeout=20) as r:
+                data = json.loads(r.read().decode())
+        except Exception as e:
+            print('gateway fetch failed:', e, file=sys.stderr)
+            continue
+        out[window] = data.get('stats') or data.get('data') or []
+
+    if out.get('today') is not None or out.get('total') is not None:
+        print(post(out))
+    else:
+        print('no call-stat data from gateway', file=sys.stderr)
+
+
+# --------------------------- SMS-stat mode --------------------------
+def run_smsstat():
+    host = os.environ.get('SK_HOST', '192.168.8.10')
+    port = os.environ.get('SK_PORT', '80')
+    user = os.environ.get('SK_USER')
+    pw   = os.environ.get('SK_PASS')
+
+    # type: 2 = today, 3 = cumulative. Forward raw arrays; the function maps them.
+    out = {'type': 'sms-stat'}
+    for window, typ in (('today', '2'), ('total', '3')):
+        url = ("http://%s:%s/goip_get_sms_stat.html?" % (host, port)) + urllib.parse.urlencode({
+            'version': '1.1', 'username': user, 'password': pw,
+            'ports': 'all', 'slots': 'all', 'type': typ,
+        })
+        try:
+            with urllib.request.urlopen(url, timeout=20) as r:
+                data = json.loads(r.read().decode())
+        except Exception as e:
+            print('gateway sms-stat fetch failed:', e, file=sys.stderr)
+            continue
+        out[window] = data.get('stats') or data.get('data') or []
+
+    if out.get('today') is not None or out.get('total') is not None:
+        print(post(out))
+    else:
+        print('no sms-stat data from gateway', file=sys.stderr)
+
+
+# ------------------------------ SMS / USSD mode -----------------------
+# Reads the gateway inbox (which also captures USSD replies), forwards the
+# SabaFon balance replies to the function, which parses the number.
+def run_sms():
+    host = os.environ.get('SK_HOST', '192.168.8.10')
+    port = os.environ.get('SK_PORT', '80')
+    user = os.environ.get('SK_USER')
+    pw   = os.environ.get('SK_PASS')
+    state_file = os.environ.get('SMS_STATE_FILE', '/var/lib/sim-collector/sms_state')
+
+    # state: "<ssrc> <next_sms_id>"
+    ssrc_prev, start = None, 1
+    try:
+        parts = open(state_file).read().split()
+        if len(parts) == 2:
+            ssrc_prev, start = parts[0], int(parts[1])
+    except Exception:
+        pass
+
+    url = ("http://%s:%s/goip_get_sms.html?" % (host, port)) + urllib.parse.urlencode({
+        'username': user, 'password': pw, 'sms_id': start, 'sms_num': 0, 'sms_del': 0,
+    })
+    try:
+        with urllib.request.urlopen(url, timeout=20) as r:
+            data = json.loads(r.read().decode())
+    except Exception as e:
+        print('gateway inbox fetch failed:', e, file=sys.stderr)
+        sys.exit(1)
+
+    ssrc = str(data.get('ssrc'))
+    if ssrc_prev is not None and ssrc != ssrc_prev:
+        start = 1  # gateway rebooted; inbox numbering reset
+
+    rows = []
+    for sms in data.get('data', []):
+        # [delivery_flag, port, timestamp, sender, recipient, base64_content]
+        try:
+            p = sms[1]
+            sender = str(sms[3]) if len(sms) > 3 else ''
+            text = base64.b64decode(sms[5]).decode('utf-8', 'ignore')
+        except Exception:
+            continue
+        # Forward operator messages (balance / top-up / recharge warning) and
+        # the self-number reply from the MMN service (sender 333).
+        s = sender.strip()
+        if ('saba' in sender.lower() or 'رصيد' in text
+                or 'وحد' in text or 'شحن' in text
+                or s == '333' or '333' in s or 'رقمك' in text
+                or 'متاح' in text or 'متوفر' in text):
+            rows.append({'port': p, 'from': sender, 'text': text})
+
+    if rows:
+        print(post({'type': 'ussd', 'rows': rows}))
+    else:
+        n = len(data.get('data', []))
+        print('inbox: %d messages, no balance replies matched' % n, file=sys.stderr)
+        if n:
+            try:
+                print('sample:', base64.b64decode(data['data'][0][5]).decode('utf-8', 'ignore')[:200], file=sys.stderr)
+            except Exception:
+                pass
+
+    nxt = data.get('next_sms')
+    if nxt:
+        try:
+            with open(state_file, 'w') as f:
+                f.write('%s %s' % (ssrc, nxt))
+        except Exception as e:
+            print('could not write sms state:', e, file=sys.stderr)
+
+
+# ------------------------------ Inquiry (on-demand balance) ----------------
+# Triggered by the dashboard "refresh balance" button. The dashboard writes a
+# request to Firestore; the Cloud Function exposes it (and the ports that hold
+# inserted SIMs) at ?balance-pending=1. We send *102# to those ports via the
+# gateway USSD API; the gateway's own Balance Keywords parse the reply into the
+# bal field, which reaches the dashboard on the next status push.
+def send_ussd(host, skport, user, pw, port, text='*102#'):
+    """Send a USSD code to a port via goip_send_ussd.html. The gateway returns the
+    reply synchronously in the JSON 'resp' field. Returns the reply text, or None."""
+    url = ("http://%s:%s/goip_send_ussd.html?" % (host, skport)) + urllib.parse.urlencode(
+        {'username': user, 'password': pw, 'port': str(port), 'ussd': text})
+    try:
+        with urllib.request.urlopen(url, timeout=25) as r:
+            data = json.loads(r.read().decode('utf-8', 'ignore'))
+    except Exception as e:
+        print('send_ussd port %s failed: %s' % (port, e), file=sys.stderr)
+        return None
+    if str(data.get('code')) not in ('0', '200'):
+        print('send_ussd port %s -> %s' % (port, data), file=sys.stderr)
+        return None
+    return data.get('resp') or data.get('reply') or ''
+
+
+def run_inquiry():
+    host = os.environ.get('SK_HOST', '192.168.8.10')
+    skport = os.environ.get('SK_PORT', '80')
+    user = os.environ.get('SK_USER')
+    pw = os.environ.get('SK_PASS')
+    state_file = os.environ.get('INQ_STATE_FILE', '/var/lib/sim-collector/inquiry_state')
+
+    # Manual test: `collector.py inquiry 29` sends now and prints the reply.
+    force = sys.argv[2] if len(sys.argv) > 2 else None
+    if force:
+        targets = [{'port': p, 'id': p} for p in force.replace(' ', '').split(',') if p]
+        requested = None
+    else:
+        url = FUNC_URL + ('&' if '?' in FUNC_URL else '?') + 'token=' + urllib.parse.quote(TOKEN) + '&balance-pending=1'
+        try:
+            with urllib.request.urlopen(url, timeout=20) as r:
+                data = json.loads(r.read().decode())
+        except Exception as e:
+            print('balance-pending fetch failed:', e, file=sys.stderr)
+            sys.exit(1)
+        requested = data.get('requestedAt')
+        targets = data.get('targets') or []
+        try:
+            last = open(state_file).read().strip()
+        except Exception:
+            last = ''
+        if not requested or str(requested) == last:
+            print('no new balance request')
+            return
+        if not targets:
+            print('balance requested but no active SIMs to query')
+
+    rows = []
+    for tgt in targets:
+        resp = send_ussd(host, skport, user, pw, tgt['port'])
+        if resp:
+            print('port %s -> %s' % (tgt['port'], resp[:140]))
+            rows.append({'id': tgt['id'], 'port': str(tgt['port']), 'text': resp})
+    if rows:
+        print(post({'type': 'balance', 'rows': rows}))
+    else:
+        print('no balance replies captured', file=sys.stderr)
+
+    if requested:
+        try:
+            with open(state_file, 'w') as f:
+                f.write(str(requested))
+        except Exception as e:
+            print('could not write inquiry state:', e, file=sys.stderr)
+
+
+
+def send_sms_task(host, skport, user, pw, port, to, body):
+    """Send one SMS through the gateway (goip_post_sms.html). Used to fire the
+    MMN self-number request from a specific SIM port."""
+    coding = 0 if body.isascii() else 1
+    tid = (int(datetime.datetime.now().timestamp()) % 100000) * 100 + (int(port) % 100)
+    payload = json.dumps({"type": "send-sms", "task_num": 1,
+        "tasks": [{"tid": tid, "from": str(port), "to": str(to),
+                   "sms": body, "smstype": 0, "coding": coding}]},
+        ensure_ascii=False).encode('utf-8')
+    url = ("http://%s:%s/goip_post_sms.html?" % (host, skport)) + urllib.parse.urlencode(
+        {'username': user, 'password': pw})
+    req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            raw = r.read().decode('utf-8', 'ignore')
+    except Exception as e:
+        print('send_sms port %s failed: %s' % (port, e), file=sys.stderr)
+        return False
+    print('MMN port %s -> %s' % (port, raw[:120]), file=sys.stderr)
+    try:
+        return str(json.loads(raw).get('code')) in ('0', '200')
+    except Exception:
+        return False
+
+
+# --------------------- Number mode (on-demand self-number) -----------------
+# Triggered by the dashboard "fetch numbers" button. The function returns the
+# inserted SIMs that still have NO stored number; we send "MMN" to 333 from each
+# one. SabaFon's reply lands in the inbox and the normal sms poller forwards it;
+# the Cloud Function parses the MSISDN and stores it. Costs ~10 riyals per SIM
+# and needs balance on the SIM.
+def run_number():
+    host = os.environ.get('SK_HOST', '192.168.8.10')
+    skport = os.environ.get('SK_PORT', '80')
+    user = os.environ.get('SK_USER')
+    pw = os.environ.get('SK_PASS')
+    to = os.environ.get('MMN_TO', '333')
+    body = os.environ.get('MMN_TEXT', 'MMN')
+    state_file = os.environ.get('NUM_STATE_FILE', '/var/lib/sim-collector/number_state')
+
+    force = sys.argv[2] if len(sys.argv) > 2 else None
+    if force:
+        targets = [{'port': p, 'id': p} for p in force.replace(' ', '').split(',') if p]
+        requested = None
+    else:
+        url = FUNC_URL + ('&' if '?' in FUNC_URL else '?') + 'token=' + urllib.parse.quote(TOKEN) + '&number-pending=1'
+        try:
+            with urllib.request.urlopen(url, timeout=20) as r:
+                data = json.loads(r.read().decode())
+        except Exception as e:
+            print('number-pending fetch failed:', e, file=sys.stderr)
+            sys.exit(1)
+        requested = data.get('requestedAt')
+        targets = data.get('targets') or []
+        try:
+            last = open(state_file).read().strip()
+        except Exception:
+            last = ''
+        if not requested or str(requested) == last:
+            print('no new number request')
+            return
+        if not targets:
+            print('number requested but every inserted SIM already has a number')
+
+    sent = 0
+    for tgt in targets:
+        if send_sms_task(host, skport, user, pw, tgt['port'], to, body):
+            print('MMN sent on port %s' % tgt['port'])
+            sent += 1
+        else:
+            print('MMN failed on port %s (balance? try later)' % tgt['port'], file=sys.stderr)
+    print('number: sent %d request(s); replies arrive via the sms poller' % sent)
+
+    if requested:
+        try:
+            with open(state_file, 'w') as f:
+                f.write(str(requested))
+        except Exception as e:
+            print('could not write number state:', e, file=sys.stderr)
+
+
+
+# --------------------------- Live status mode -----------------------
+# Poll goip_get_status.html for each port's ACTIVE slot and forward its real
+# status code (st) as `liveSt`. The gateway's own status push freezes st at 6,
+# so this poll is the only source of the active SIM's true registration health
+# (0 no-SIM, 3 registered, 5 no-balance, 6 reg-fail, 9 SIM error, ...).
+def run_status():
+    host = os.environ.get('SK_HOST', '192.168.8.10')
+    port = os.environ.get('SK_PORT', '80')
+    user = os.environ.get('SK_USER')
+    pw   = os.environ.get('SK_PASS')
+    url = ("http://%s:%s/goip_get_status.html?" % (host, port)) + urllib.parse.urlencode({
+        'version': '1.1', 'username': user, 'password': pw,
+        'ports': 'all', 'slots': 'all',
+    })
+    try:
+        with urllib.request.urlopen(url, timeout=20) as r:
+            data = json.loads(r.read().decode())
+    except Exception as e:
+        print('gateway status fetch failed:', e, file=sys.stderr)
+        return
+    rows = []
+    for s in (data.get('status') or []):
+        pid = s.get('port')
+        if not pid:
+            continue
+        rows.append({
+            'id': str(pid),
+            'liveSt': s.get('st'),
+            'net': s.get('network'),
+            'active': s.get('active'),
+            'inserted': s.get('inserted'),
+        })
+    if rows:
+        print(post({'type': 'live-status', 'rows': rows}))
+    else:
+        print('no status entries from gateway', file=sys.stderr)
+
+
+if __name__ == '__main__':
+    if not FUNC_URL or not TOKEN:
+        print('Set FUNC_URL and PUSH_TOKEN (see collector.env.example)', file=sys.stderr)
+        sys.exit(1)
+    mode = sys.argv[1] if len(sys.argv) > 1 else 'cdr'
+    if mode == 'cdr':
+        run_cdr()
+    elif mode == 'callstat':
+        run_callstat()
+    elif mode == 'sms':
+        run_sms()
+    elif mode == 'inquiry':
+        run_inquiry()
+    elif mode == 'smsstat':
+        run_smsstat()
+    elif mode == 'number':
+        run_number()
+    elif mode == 'status':
+        run_status()
+    else:
+        print('usage: collector.py [cdr|callstat|sms|inquiry|smsstat|number|status]', file=sys.stderr)
+        sys.exit(1)

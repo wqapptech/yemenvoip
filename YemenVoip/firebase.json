@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "site": "yemenvoip",
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}

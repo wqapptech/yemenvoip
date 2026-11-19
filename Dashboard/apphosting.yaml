@@ -1,0 +1,8 @@
+# Firebase App Hosting config (used when you connect this repo to App Hosting)
+runConfig:
+  minInstances: 0
+  maxInstances: 2
+  cpu: 1
+  memoryMiB: 512
+# When you move to App Hosting, set the NEXT_PUBLIC_* values here as env vars,
+# or keep them in .env.local for local/web-frameworks builds.

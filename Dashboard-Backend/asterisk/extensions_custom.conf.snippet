@@ -1,0 +1,12 @@
+; --- Outbound SMS with SIM failover ----------------------------------------
+; A SIP MESSAGE on an SMS-enabled extension (message_context=partner-sms) lands
+; here. EXTEN = the number typed; the text is in SMSBODY. SMS_PORTS is the
+; ordered list of SIM ports to try — it sends on the first healthy one and
+; fails over to the next if a SIM is unregistered / errored / out of balance.
+; Edit the list to your SIMs (priority order).
+[partner-sms]
+exten => _[+0-9].,1,NoOp(Outbound SMS to ${EXTEN})
+ same => n,Set(SMSBODY=${MESSAGE(body)})
+ same => n,Set(SMS_PORTS=29,25,30)
+ same => n,AGI(gw_sendsms.py,${EXTEN})
+ same => n,Hangup()

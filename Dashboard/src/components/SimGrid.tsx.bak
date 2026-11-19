@@ -1,0 +1,257 @@
+'use client';
+import { useMemo, useState, useEffect } from 'react';
+import {
+  statusInfo, toneCard, toneDot, isLowBalance,
+  isStale, portOf, slotOf, pickBalance,
+  needsTopup, parseMinutes, isLowMinutes,
+} from '@/lib/status';
+import { useI18n } from '@/lib/i18n';
+
+export interface Sim {
+  id: string;
+  port?: string;
+  st?: number;
+  opr?: string;
+  sig?: number;
+  bal?: string | number;
+  balance?: string | number;
+  balanceNum?: number;
+  balanceAt?: unknown;
+  smsBalance?: string | number;
+  smsBalanceNum?: number;
+  smsBalanceAt?: unknown;
+  lastTopup?: number;
+  lastTopupAt?: unknown;
+  needsRecharge?: boolean;
+  rechargeAt?: unknown;
+  active?: number;
+  slot_active?: number;
+  inserted?: number;
+  msisdn?: string;
+  msisdnAt?: unknown;
+  minutes?: number;
+  minutesAt?: unknown;
+  minutesExp?: string;
+  smsBundle?: number;
+  updatedAt?: unknown;
+  calls?: { today?: CallStat; total?: CallStat };
+  sms?: { today?: SmsStat; total?: SmsStat };
+}
+
+export interface CallStat {
+  total?: number;
+  answered?: number;
+  noAnswer?: number;
+  failed?: number;
+  asr?: number; // answer-seizure ratio (%)
+  acd?: number; // average call duration (seconds)
+}
+
+export interface SmsStat {
+  sent?: number;
+  received?: number;
+  failed?: number;
+}
+
+function cleanOpr(o?: string): string {
+  if (!o) return '—';
+  const s = o.trim();
+  if (s === '' || s === '0') return '—';
+  const words = s.replace(/^\d+\s*/, '').split(/\s+/);
+  return words.length && words[0] ? words[0] : s;
+}
+
+function isActive(s: Sim): boolean {
+  return s.active === 1 || s.slot_active === 1;
+}
+
+function balanceOf(s: Sim): string | number | undefined {
+  return pickBalance(s) ?? undefined;
+}
+
+// CSQ (0–31, 99 = unknown) -> bar count 0–4 and a colour.
+function signalLevel(sig?: number): { bars: number; color: string } {
+  if (sig == null || sig >= 99 || sig <= 1) return { bars: 0, color: 'bg-rose-500' };
+  if (sig <= 9)  return { bars: 1, color: 'bg-rose-500' };
+  if (sig <= 14) return { bars: 2, color: 'bg-amber-500' };
+  if (sig <= 19) return { bars: 3, color: 'bg-emerald-500' };
+  return { bars: 4, color: 'bg-emerald-500' };
+}
+
+// Phone-style signal bars. dir=ltr so bars always rise left→right, even in RTL.
+function SignalBars({ sig }: { sig?: number }) {
+  const { bars, color } = signalLevel(sig);
+  const heights = ['h-1.5', 'h-2.5', 'h-3.5', 'h-4'];
+  return (
+    <span dir="ltr" className="flex items-end gap-0.5" aria-label={`signal ${bars} of 4`}>
+      {heights.map((h, i) => (
+        <span key={i} className={'w-1 rounded-sm ' + h + ' ' + (i < bars ? color : 'bg-slate-200')} />
+      ))}
+    </span>
+  );
+}
+
+interface PortGroup { port: string; sims: Sim[] }
+
+// Occupancy strip: 8 slots, coloured when a SIM sits there, ringed when active.
+function SlotStrip({ sims, now }: { sims: Sim[]; now: number }) {
+  const bySlot = new Map<number, Sim>();
+  for (const s of sims) { const n = slotOf(s.id ?? s.port); if (n != null) bySlot.set(n, s); }
+  return (
+    <span dir="ltr" className="flex items-center gap-1">
+      {Array.from({ length: 8 }, (_, i) => i + 1).map((n) => {
+        const s = bySlot.get(n);
+        if (!s) return <span key={n} className="h-2 w-2 rounded-full bg-slate-200" />;
+        const tone = statusInfo(Number(s.st ?? 0)).tone;
+        const stale = isStale(s.updatedAt, now);
+        const ring = isActive(s) ? ' ring-2 ring-offset-1 ring-slate-400' : '';
+        return (
+          <span key={n}
+            className={'h-2 w-2 rounded-full ' + (stale ? 'bg-slate-300' : toneDot[tone]) + ring}
+          />
+        );
+      })}
+    </span>
+  );
+}
+
+function SlotRow({ s, now, onSelect }: { s: Sim; now: number; onSelect?: (s: Sim) => void }) {
+  const { t, lang } = useI18n();
+  const info = statusInfo(Number(s.st ?? 0));
+  const label = lang === 'ar' ? info.ar : info.en;
+  const slot = slotOf(s.id ?? s.port);
+  const active = isActive(s);
+  const stale = isStale(s.updatedAt, now);
+  const bal = balanceOf(s);
+  const mins = parseMinutes(s.minutes);
+  const lowBal = isLowBalance(bal);
+  const lowMin = isLowMinutes(s.minutes);
+  const showRecharge = needsTopup(s);
+  const sigShown = s.sig != null && s.sig < 99 ? s.sig : '—';
+
+  return (
+    <div
+      role="button" tabIndex={0}
+      onClick={() => onSelect?.(s)}
+      className={
+        'rounded-xl border p-2.5 text-xs transition active:scale-[0.99] hover:shadow-sm cursor-pointer ' +
+        (stale ? 'border-slate-200 bg-slate-50 opacity-60 ' : toneCard[info.tone] + ' ')
+      }
+    >
+      {/* header: slot badge · number/status · signal */}
+      <div className="flex items-center gap-2">
+        <span
+          dir="ltr"
+          className={
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-extrabold tabular-nums ' +
+            (active ? 'bg-slate-800 text-white' : 'bg-white/70 text-slate-500 border border-slate-200')
+          }
+          title={active ? t('activeLabel') : t('slotLabel')}
+        >
+          {slot != null ? String(slot).padStart(2, '0') : '—'}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-bold text-slate-800 tabular-nums" dir="ltr">
+            {s.msisdn || label}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-400">
+            <span className={'h-1.5 w-1.5 shrink-0 rounded-full ' + toneDot[info.tone]} />
+            <span className="truncate">{s.msisdn ? label : cleanOpr(s.opr)}</span>
+          </div>
+        </div>
+        <span className="flex shrink-0 flex-col items-end gap-0.5">
+          <SignalBars sig={s.sig} />
+          <span className="text-[10px] font-semibold text-slate-500 tabular-nums">{sigShown}</span>
+        </span>
+      </div>
+
+      {/* flags */}
+      {(showRecharge || stale) && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {showRecharge && (
+            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">⚠ {t('recharge')}</span>
+          )}
+          {stale && (
+            <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">{t('stale')}</span>
+          )}
+        </div>
+      )}
+
+      {/* stats: balance · minutes */}
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
+        <div className="rounded-lg bg-white/60 px-2 py-1">
+          <div className="text-[10px] font-medium text-slate-400">{t('balance')}</div>
+          <div className={'font-bold tabular-nums ' + (lowBal ? 'text-rose-600' : 'text-slate-800')} dir="ltr">
+            {bal != null && bal !== '' ? bal : '—'}
+          </div>
+        </div>
+        <div className="rounded-lg bg-white/60 px-2 py-1">
+          <div className="text-[10px] font-medium text-slate-400">{t('minutesLeft')}</div>
+          <div className={'font-bold tabular-nums ' + (lowMin ? 'text-rose-600' : 'text-slate-800')} dir="ltr">
+            {mins != null ? `${mins} ${t('minUnit')}` : '—'}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PortCard({ g, now, onSelect }: { g: PortGroup; now: number; onSelect?: (s: Sim) => void }) {
+  const { t } = useI18n();
+  const live = g.sims.filter((s) => !isStale(s.updatedAt, now));
+  const lowCount = g.sims.filter((s) => needsTopup(s)).length;
+  const staleCount = g.sims.length - live.length;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-xs font-semibold text-slate-400">{t('portLabel')}</span>
+          <span className="text-lg font-extrabold text-slate-800 tabular-nums" dir="ltr">{g.port}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {lowCount > 0 && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">⚠ {lowCount}</span>
+          )}
+          {staleCount > 0 && (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-400">{staleCount} {t('stale')}</span>
+          )}
+          <SlotStrip sims={g.sims} now={now} />
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600 tabular-nums">{g.sims.length}</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {g.sims.map((s) => <SlotRow key={s.id} s={s} now={now} onSelect={onSelect} />)}
+      </div>
+    </div>
+  );
+}
+
+export default function SimGrid({ sims, onSelect }: { sims: Sim[]; onSelect?: (s: Sim) => void }) {
+  // Re-tick so staleness re-evaluates even without new data.
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  const groups = useMemo<PortGroup[]>(() => {
+    const m = new Map<string, Sim[]>();
+    for (const s of sims) {
+      const p = portOf(s.port ?? s.id);
+      const arr = m.get(p); if (arr) arr.push(s); else m.set(p, [s]);
+    }
+    const list: PortGroup[] = Array.from(m.entries()).map(([port, arr]) => ({
+      port,
+      sims: arr.sort((a, b) => (slotOf(a.id ?? a.port) ?? 99) - (slotOf(b.id ?? b.port) ?? 99)),
+    }));
+    list.sort((a, b) => (parseInt(a.port, 10) || 0) - (parseInt(b.port, 10) || 0));
+    return list;
+  }, [sims]);
+
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {groups.map((g) => <PortCard key={g.port} g={g} now={now} onSelect={onSelect} />)}
+    </div>
+  );
+}
